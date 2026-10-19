@@ -45,6 +45,36 @@ export function ensureSchema() {
   return schemaReady;
 }
 
+let creditsReady = null;
+
+/**
+ * One row per SONA survey code: the outcome of granting that participant's
+ * credit -- see api/_lib/sona.js, the only writer.
+ *
+ * It exists for two reasons. SONA's answer to a second grant for the same code
+ * is undocumented, so a retried final upload must not ask twice: a code whose
+ * row says "granted" is answered from here. And it is the researcher's record
+ * of who was credited automatically and who still needs it done by hand,
+ * readable through api/export.js?credits=1.
+ */
+export function ensureCreditsSchema() {
+  if (!creditsReady) {
+    creditsReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS sona_credits (
+          survey_code TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          detail TEXT,
+          session_row INTEGER,
+          attempts INTEGER NOT NULL DEFAULT 1,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+      `;
+    })().catch((e) => { creditsReady = null; throw e; });
+  }
+  return creditsReady;
+}
+
 let consentReady = null;
 
 /**

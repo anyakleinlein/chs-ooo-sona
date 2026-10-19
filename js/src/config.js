@@ -90,6 +90,17 @@ export const CONFIG = {
   chs_child: null,
   chs_response: null,
 
+  // SONA, when this is running as a SONA online external study. Set the
+  // SONA Study URL to the deploy with %SURVEY_CODE% in it:
+  //
+  //   https://<project>.vercel.app/?sona=%SURVEY_CODE%
+  //
+  // SONA swaps in the participant's anonymous survey code, which becomes the
+  // participant_id. Credit is granted by the SERVER once the final upload is
+  // stored (api/_lib/sona.js) -- nothing here knows SONA's credit URL, because
+  // anything in this file is readable by every participant.
+  sona_id: null,
+
   // Whether the closing screen OFFERS a download button at all. Nothing
   // downloads automatically in any arm -- see save() in main.js -- so this no
   // longer suppresses a prompt, it decides whether there is a way to a local
@@ -249,6 +260,25 @@ export function applyUrlOverrides(cfg, search = window.location.search,
     chs = true;
   }
 
+  // SONA's survey code goes into the credit URL and the page, so only the
+  // characters SONA itself issues are accepted. It wins over ?pid= for the
+  // same reason the CHS hash does: credit is granted against this id.
+  //
+  // A SONA session is locked like a CHS one -- a participant who could add
+  // ?rooms=1&trials=1 would earn credit in two taps. The one exception is a
+  // code starting TEST: SONA's own codes are numeric, so a TEST code can never
+  // be credited, and a short smoke test of the whole SONA path is worth having.
+  const sona = q.get("sona");
+  let sonaLocked = false;
+  if (!chs && sona && /^[A-Za-z0-9_-]{1,64}$/.test(sona)) {
+    cfg.sona_id = sona;
+    cfg.participant_id = sona;
+    cfg.offer_download = false;
+    cfg.Setting = "sona";
+    sonaLocked = !/^TEST/i.test(sona);
+  }
+  const locked = chs || sonaLocked;
+
   // -- where things come from and go to: this origin only ------------------
   const media = sameOrigin(q.get("media"), loc);
   if (media) {
@@ -270,7 +300,7 @@ export function applyUrlOverrides(cfg, search = window.location.search,
   // Still settable on a dev host, because otherwise there is no way to walk
   // the CHS path in a two-room session -- which is exactly what the jsdom
   // harness does, and what anyone smoke-testing that path needs.
-  if (!chs || dev) {
+  if (!locked || dev) {
     // 64 is comfortably above anything sessionPlan produces (50 blocks of 78
     // for the longest plan) and far below the point where building the
     // timeline stops being instant.
@@ -288,7 +318,7 @@ export function applyUrlOverrides(cfg, search = window.location.search,
     // child hash -- the join key back to the demographic snapshot, which a
     // second id would break.
     const pid = text(q.get("pid"), 64);
-    if (pid) cfg.participant_id = pid;
+    if (pid && !cfg.sona_id) cfg.participant_id = pid;
   }
 
   // -- what the study IS ---------------------------------------------------
@@ -309,7 +339,7 @@ export function applyUrlOverrides(cfg, search = window.location.search,
   //
   // Everything stays settable on a dev host, or the CHS path could only ever
   // be smoke-tested in whatever tier CONFIG happens to name.
-  const studyConfigurable = !chs || dev;
+  const studyConfigurable = !locked || dev;
   if (studyConfigurable) {
     if (q.get("tier")) cfg.Tier = Number(q.get("tier")) === 2 ? 2 : 1;
     const mode = oneOf(q.get("mode"), ["disjoint", "shared"]);

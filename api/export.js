@@ -20,7 +20,7 @@
  * has no persistent disk to write them to.
  */
 import { sql } from "@vercel/postgres";
-import { ensureSchema } from "./_lib/schema.js";
+import { ensureSchema, ensureCreditsSchema } from "./_lib/schema.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -43,6 +43,23 @@ export default async function handler(req, res) {
 
   const pid = typeof req.query.participant_id === "string" ? req.query.participant_id : null;
   const all = req.query.all === "1";
+
+  // The SONA credit ledger instead of sessions: who was credited
+  // automatically, and who was refused or failed and needs it done by hand in
+  // SONA. See api/_lib/sona.js.
+  if (req.query.credits === "1") {
+    try {
+      await ensureCreditsSchema();
+      const { rows } = pid
+        ? await sql`SELECT * FROM sona_credits WHERE survey_code = ${pid};`
+        : await sql`SELECT * FROM sona_credits ORDER BY updated_at DESC;`;
+      res.status(200).json({ ok: true, count: rows.length, credits: rows });
+    } catch (e) {
+      console.error("credits export failed", e);
+      res.status(502).json({ ok: false, error: "storage unavailable" });
+    }
+    return;
+  }
 
   try {
     // Create the table if this database has never had a session written to

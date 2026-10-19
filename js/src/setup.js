@@ -36,14 +36,21 @@ const RACE = ["", "American Indian or Alaska Native", "Asian",
               "Two or more races", "Prefer to self-describe",
               "Prefer not to answer"];
 const RACE_SELF_DESCRIBE = "Prefer to self-describe";
-const SETTING = ["lab", "home", "school", "clinic"];
-const EXPOSURE = ["", "None", "Occasional", "Frequent"];
-const SCREEN_TIME = ["", "<1 hour", "1-2 hours", "2-4 hours", "4+ hours"];
 
 const options = (values, selected) => values
   .map((v) => `<option value="${v}"${v === selected ? " selected" : ""}>` +
               `${v || "—"}</option>`)
   .join("");
+
+/**
+ * A fresh anonymous id, e.g. "P-7K2QX9MD". The alphabet drops 0/O and 1/I/L
+ * so an id read aloud or copied by hand cannot be mistyped into another one.
+ */
+export function randomParticipantId() {
+  const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return "P-" + Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join("");
+}
 
 /** True when the session is already configured and the form should be skipped. */
 export function setupNeeded(search = window.location.search) {
@@ -61,26 +68,31 @@ export function setupNeeded(search = window.location.search) {
  * Never rejects: the only way out is Start, which always yields a session.
  */
 export function showSetup(cfg, root, search = window.location.search) {
-  // Start blank unless the URL named a participant. CONFIG carries a
-  // placeholder id ("WEB01"), and prefilling it invites an experimenter to
-  // press Start straight through -- which would run every session under the
-  // same id, and since the id seeds the triplets, block order and reward
-  // schedule, give every child an identical session.
-  const urlPid = new URLSearchParams(search).get("pid") ?? "";
+  // The id is never typed here. A SONA link already set it (applyUrlOverrides);
+  // otherwise it is drawn fresh, as the lab build does. CONFIG's placeholder
+  // ("WEB01") must never survive to Start: the id seeds the triplets, block
+  // order and reward schedule, so a shared id gives everyone the same session.
+  const urlPid = new URLSearchParams(search).get("pid");
+  const pid = cfg.sona_id || urlPid || randomParticipantId();
+  // A SONA participant fills this in about themselves, on their own computer.
+  // The task and length are the study's, not theirs to pick: shorter means
+  // credit for less, so those two controls are not rendered at all and the
+  // session runs CONFIG's (applyUrlOverrides has already locked them).
+  const sona = Boolean(cfg.sona_id);
   return new Promise((resolve) => {
     root.innerHTML = `
       <div class="setup">
-        <h1>Session setup</h1>
-        <p class="setup-sub">Fill the blank fields in before handing the screen to the child.</p>
+        <h1>${sona ? "Before you begin" : "Session setup"}</h1>
+        <p class="setup-sub">${sona
+          ? "Please answer a few questions about yourself. Only your age is "
+            + "required; anything else you would rather not answer can be left blank."
+          : "Fill the blank fields in before handing the screen to the child."}</p>
 
         <div class="setup-grid">
-          <label>Participant Name
-            <input id="s-pid" type="text" value="${urlPid}"
-                   autocomplete="off" spellcheck="false"></label>
-          <label>Age
+          <label>${sona ? "Your age" : "Age"}
             <input id="s-age" type="number" min="3" max="99" required
                    value="${cfg.Age ?? ""}" autocomplete="off"></label>
-
+          ${sona ? "" : `
           <label>Task
             <select id="s-tier">
               <option value="1" selected>Tier 1: Visual (THINGS 560)</option>
@@ -93,7 +105,7 @@ export function showSetup(cfg, root, search = window.location.search) {
             <select id="s-duration">
               ${DURATIONS.map((d) => `<option value="${d}"` +
                 `${d === cfg.Session_Duration ? " selected" : ""}>${d}</option>`).join("")}
-            </select></label>
+            </select></label>`}
 
           <label>Gender
             <select id="s-gender">${options(GENDER, cfg.Gender)}</select></label>
@@ -117,36 +129,30 @@ export function showSetup(cfg, root, search = window.location.search) {
             <input id="s-lang2" type="text" value="${cfg.Other_Languages ?? ""}"
                    placeholder="Comma-separated, blank if none"
                    autocomplete="off"></label>
-
-          <label>Site
-            <input id="s-site" type="text" value="${cfg["Experiment Site"] ?? ""}"
-                   autocomplete="off"></label>
-
-          <label>Setting
-            <select id="s-setting">${options(SETTING, cfg.Setting)}</select></label>
-          <label>VR exposure
-            <select id="s-vr">${options(EXPOSURE, cfg.VR_Exposure)}</select></label>
-
-          <label>Daily screen time
-            <select id="s-screen">${options(SCREEN_TIME, cfg.Screen_Time)}</select></label>
         </div>
 
         <div class="setup-preview" id="s-preview"></div>
         <p class="setup-error" id="s-error" hidden></p>
-        <button class="big" id="s-start">Start session</button>
+        <button class="big" id="s-start">${sona ? "Continue" : "Start session"}</button>
       </div>`;
 
     const el = (id) => root.querySelector(id);
     const preview = el("#s-preview");
     const error = el("#s-error");
 
+    const tier = () => (sona ? cfg.Tier : Number(el("#s-tier").value));
     const plan = () => sessionPlan(el("#s-age").value || 25,
-                                   el("#s-duration").value,
-                                   Number(el("#s-tier").value));
+                                   sona ? cfg.Session_Duration : el("#s-duration").value,
+                                   tier());
 
     function refresh() {
       const p = plan();
-      const tier2 = Number(el("#s-tier").value) === 2;
+      if (sona) {
+        preview.innerHTML = `<span>This study takes about ${p.minutes} minutes. `
+          + `Please do it in one sitting, in a quiet place.</span>`;
+        return;
+      }
+      const tier2 = tier() === 2;
       preview.innerHTML =
         `<strong>Session preview</strong>` +
         `<span>Age group: ${p.bin.replace(/_/g, " ")}</span>` +
@@ -170,28 +176,20 @@ export function showSetup(cfg, root, search = window.location.search) {
     el("#s-race").addEventListener("change", syncRaceSelfDescribe);
     syncRaceSelfDescribe();
 
-    ["#s-age", "#s-duration", "#s-tier"].forEach((id) => {
-      el(id).addEventListener("input", refresh);
-      el(id).addEventListener("change", refresh);
+    ["#s-age", "#s-duration", "#s-tier"].map(el).filter(Boolean).forEach((input) => {
+      input.addEventListener("input", refresh);
+      input.addEventListener("change", refresh);
     });
     refresh();
 
     el("#s-start").addEventListener("click", () => {
-      const pid = el("#s-pid").value.trim();
-      // The id seeds the whole session -- triplets, block order, reward
-      // schedule. A blank one would make every participant identical.
-      if (!pid) {
-        error.textContent = "Participant ID is required: it seeds the session.";
-        error.hidden = false;
-        el("#s-pid").focus();
-        return;
-      }
       // Age is required, not defaulted -- consent.js's showConsentGate reads
       // it straight from here to pick the MELD form, and a silently-defaulted
       // adult age would risk gating a minor's session on the wrong form.
       const ageVal = el("#s-age").value;
       if (ageVal === "" || Number(ageVal) < 0 || !Number.isFinite(Number(ageVal))) {
-        error.textContent = "Age is required: it decides the consent form and the session length.";
+        error.textContent = sona ? "Please enter your age to continue."
+          : "Age is required: it decides the consent form and the session length.";
         error.hidden = false;
         el("#s-age").focus();
         return;
@@ -201,9 +199,13 @@ export function showSetup(cfg, root, search = window.location.search) {
         ...cfg,
         participant_id: pid,
         Age: el("#s-age").value,
-        Tier: Number(el("#s-tier").value),
-        "Num Blocks": p.blocks,
-        "Num Trials": p.perBlock,
+        Tier: tier(),
+        // A length the URL pinned survives the form; otherwise this preview's
+        // plan is what runs.
+        ...(cfg.session_length_pinned ? {} : {
+          "Num Blocks": p.blocks,
+          "Num Trials": p.perBlock,
+        }),
         Session_Duration: p.duration,
         Gender: el("#s-gender").value,
         Handedness: el("#s-hand").value,
@@ -215,10 +217,6 @@ export function showSetup(cfg, root, search = window.location.search) {
           ? el("#s-race-self").value.trim() : "",
         First_Language: el("#s-lang1").value.trim(),
         Other_Languages: el("#s-lang2").value.trim(),
-        "Experiment Site": el("#s-site").value.trim(),
-        Setting: el("#s-setting").value,
-        VR_Exposure: el("#s-vr").value,
-        Screen_Time: el("#s-screen").value,
         // Gamify/Gamify_Reduced_Motion are no longer offered on this form --
         // the arm is fixed for now (CONFIG's defaults: gamified, not
         // reduced-motion), not an experimenter's per-session choice. Left

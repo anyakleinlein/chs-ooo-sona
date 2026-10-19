@@ -79,6 +79,7 @@ export function buildPayload({ config, responses, castle, shop, startTime, compl
     // chs_child afterwards. Null for lab and facility sessions.
     chs_child: config.chs_child ?? null,
     chs_response: config.chs_response ?? null,
+    sona_id: config.sona_id ?? null,
     // MELD consent/assent -- which form(s) consent.js's showConsentGate
     // determined applied to this age, and whether the required "I confirm
     // it's been completed" acknowledgement was given. The join back to an

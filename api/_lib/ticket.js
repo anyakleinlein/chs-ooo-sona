@@ -20,7 +20,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // Long enough for one session (550 trials can run past an hour for young
 // children -- see js/README.md's pacing table), short enough that a leaked
 // ticket is not a standing credential.
-const TICKET_LIFETIME_MS = 3 * 60 * 60 * 1000; // 3 hours
+export const TICKET_LIFETIME_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 function secret() {
   const s = process.env.SESSION_TICKET_SECRET;
@@ -58,4 +58,14 @@ export function verifyTicket(ticket) {
   const exp = Number(expStr);
   if (!Number.isFinite(exp) || Date.now() > exp) return null;
   return pid;
+}
+
+/**
+ * When an already-VERIFIED ticket was issued, i.e. when its session was
+ * admitted. Derived from the signed expiry, so it is as trustworthy as the
+ * ticket itself -- which is what lets api/_lib/sona.js measure how long a
+ * session actually ran without trusting the browser's clock.
+ */
+export function ticketIssuedAt(ticket) {
+  return Number(ticket.split(".")[1]) - TICKET_LIFETIME_MS;
 }

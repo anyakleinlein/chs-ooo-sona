@@ -25,6 +25,7 @@
 import { sql } from "@vercel/postgres";
 import { verifyTicket } from "./_lib/ticket.js";
 import { ensureSchema } from "./_lib/schema.js";
+import { grantSonaCredit } from "./_lib/sona.js";
 
 // Generous for 550 trials of small JSON rows, and still small enough that a
 // forged/oversized body from a client that got past the ticket check cannot
@@ -125,6 +126,7 @@ export default async function handler(req, res) {
     responses: payload.responses ?? [],
   };
 
+  let id;
   try {
     await ensureSchema();
 
@@ -150,9 +152,23 @@ export default async function handler(req, res) {
       VALUES (${pid}, ${tag}, ${JSON.stringify(stored)}::jsonb)
       RETURNING id;
     `;
-    res.status(200).json({ ok: true, id: rows[0].id });
+    id = rows[0].id;
   } catch (e) {
     console.error("session insert failed", e);
     res.status(502).json({ ok: false, error: "storage unavailable" });
+    return;
   }
+
+  // Only after the row is committed: credit is what a stored session earns.
+  // A failure here is reported as the credit's status, not as the upload's --
+  // the data IS saved, and a 5xx would make the client retry a save that
+  // already succeeded.
+  let credit = null;
+  try {
+    credit = await grantSonaCredit({ pid, ticket, payload, tag, sessionRow: id });
+  } catch (e) {
+    console.error("SONA credit step failed", e);
+    credit = "failed";
+  }
+  res.status(200).json({ ok: true, id, credit });
 }

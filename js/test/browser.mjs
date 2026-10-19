@@ -62,8 +62,12 @@ const TIER2 = new URLSearchParams(QUERY).get("tier") === "2";
 // this off the missing pid alone left the harness waiting for a form that
 // correctly never appeared, and the session never started.
 const CHS = Boolean(new URLSearchParams(QUERY).get("child"));
-const SETUP = !new URLSearchParams(QUERY).get("pid") && !CHS;
-const SETUP_PID = "FORMPID";
+// A SONA link also has no pid and DOES raise the form -- the participant's own
+// version of it -- and, with a TEST code pinning the length, is the one
+// form-driven session short enough to drive to the end. Run it as
+// `?sona=TEST42&rooms=2&trials=2`.
+const SONA = Boolean(new URLSearchParams(QUERY).get("sona"));
+const SETUP = !new URLSearchParams(QUERY).get("pid") && !CHS && !SONA;
 
 // jsdom has no navigation, so save.js's download anchor logs a "not
 // implemented" every run. Drop only that; everything else still surfaces.
@@ -82,7 +86,12 @@ for (const k of ["window", "document", "navigator", "HTMLElement", "Element",
                  "Node", "Event", "MouseEvent", "KeyboardEvent", "getComputedStyle",
                  "requestAnimationFrame", "cancelAnimationFrame", "DOMParser",
                  "HTMLMediaElement"]) {
-  if (dom.window[k] !== undefined) globalThis[k] = dom.window[k];
+  // defineProperty, not assignment: Node 21+ ships its own getter-only
+  // `navigator`, which a plain assignment throws on.
+  if (dom.window[k] !== undefined) {
+    Object.defineProperty(globalThis, k, { value: dom.window[k],
+                                           configurable: true, writable: true });
+  }
 }
 // NOT dom.window.performance: jsdom's implementation looks the global up
 // again, so aliasing it onto globalThis makes now() recurse into itself.
@@ -185,8 +194,12 @@ globalThis.fetch = async (url, init) => {
     // alone can't: a disengaged session's FINAL save also carries
     // completion_status 0, same as every checkpoint), so this must stay in
     // sync with postPayload()'s header if a third POST type is ever added.
-    if (!("X-Session-Block" in (init.headers ?? {}))) savedJson = init.body;
-    return { ok: true, status: 200, json: async () => ({}) };
+    const final = !("X-Session-Block" in (init.headers ?? {}));
+    if (final) savedJson = init.body;
+    // What api/submit.js answers a stored final save with. The closing screen
+    // of a SONA session reads `credit` from it, so the stub has to say it.
+    return { ok: true, status: 200,
+             json: async () => (final ? { ok: true, id: 1, credit: "granted" } : {}) };
   }
   // config.js resolves the asset roots from its own module URL, which under
   // node is a file:// path -- so an absolute local path arrives here as often
@@ -247,6 +260,7 @@ const placePending = (room) => {
 };
 let guard = 0;
 let setupSeen = false;
+let sonaForm = null;
 let setupPreview = "";
 // The MELD consent gate. 5 puts a CHS session in the 0-6 band, which is the
 // TWO-form case (parental + 0-6 assent) -- the branch worth driving, since a
@@ -301,10 +315,7 @@ while (!savedJson && guard++ < 8000) {
   const startBtn = target.querySelector("#s-start");
   if (startBtn) {
     // The setup screen owns the page until it is submitted.
-    const pidField = target.querySelector("#s-pid");
-    // Always set it: the field starts blank on purpose, and a blank id is
-    // rejected, so this is also what proves the form was really shown.
-    if (pidField) { pidField.value = SETUP_PID; setupSeen = true; }
+    setupSeen = true;
     // What the form says it will run, before it runs it. The form derives this
     // from sessionPlan rather than the config defaults, and that derivation is
     // the property this case exists to check.
@@ -314,6 +325,13 @@ while (!savedJson && guard++ < 8000) {
     // eight minutes. The handoff is asserted from the preview instead, and the
     // pid -> session path stays covered by the ?pid= cases above.
     if (SETUP) break;
+    if (SONA) {
+      sonaForm = {
+        heading: target.querySelector("h1")?.textContent ?? "",
+        pickers: Boolean(target.querySelector("#s-tier, #s-duration")),
+      };
+      target.querySelector("#s-age").value = "25";
+    }
     click(startBtn);
     continue;
   }
@@ -500,6 +518,10 @@ while (!savedJson && guard++ < 8000) {
 }
 
 const payload = savedJson ? JSON.parse(savedJson) : null;
+// The closing screen's SONA line is written when the upload's response comes
+// back, a tick after the POST this loop stops on.
+await new Promise((r) => setTimeout(r, 50));
+const sonaStatus = target.querySelector("#sona-status")?.textContent ?? "";
 const rows = payload?.responses ?? [];
 
 // --- assertions ------------------------------------------------------------
@@ -606,6 +628,19 @@ if (SETUP) {
   check(!/3 per room × 5 rooms/.test(setupPreview),
         "the form fell back to the config defaults instead of the plan");
 }
+if (SONA) {
+  check(sonaForm?.heading === "Before you begin",
+        `the SONA form kept the experimenter's wording: ${sonaForm?.heading}`);
+  check(sonaForm && !sonaForm.pickers,
+        "the SONA form offers task/length pickers a participant could shorten");
+  check(payload?.participant_data.sona_id === "TEST42",
+        `sona_id did not reach the payload: ${payload?.participant_data.sona_id}`);
+  check(payload?.participant_data.participant_id === "TEST42",
+        `the SONA code should be the participant id, got ` +
+        `${payload?.participant_data.participant_id}`);
+  check(/credit has been granted/.test(sonaStatus),
+        `the closing screen did not report the credit: "${sonaStatus.trim()}"`);
+}
 if (CHS) {
   // The form must not appear, and the ids CHS supplied must reach the payload
   // -- they are the only way to join this session to the family afterwards.
@@ -647,8 +682,8 @@ if (!SETUP) {
         `no closing screen after the session: ` +
         `"${target.textContent.trim().slice(0, 80)}"`);
   const corner = target.querySelector(".corner-btn");
-  check(CHS ? !corner : Boolean(corner),
-        CHS ? "a family at home was offered a data download"
+  check(CHS || SONA ? !corner : Boolean(corner),
+        CHS || SONA ? "a participant at home was offered a data download"
             : "the closing screen has no corner download button");
 }
 

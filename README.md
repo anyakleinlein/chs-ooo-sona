@@ -79,6 +79,32 @@ curl -H "Authorization: Bearer $ADMIN_EXPORT_SECRET" \
   "https://<project>.vercel.app/api/export?participant_id=SMOKE"
 ```
 
+### Running it on SONA (the `anya/sona` branch)
+
+This branch is deployed as its **own** Vercel project, with Production Branch
+`anya/sona` and its own Postgres, so the CHS deploy from `main` is untouched.
+
+- **SONA Study URL:** `https://<sona-project>.vercel.app/?sona=%SURVEY_CODE%`.
+  The task and length come from `js/src/config.js`, never from the link.
+- **Credit is granted by the server**, only after the final upload is stored
+  and only for a completed, Turnstile-gated session of at least
+  `SONA_MIN_MINUTES` (default 10). See `api/_lib/sona.js`.
+- **Extra env vars:** `SONA_CREDIT_URL` = the study's *Server-Side*
+  Completion URL with its literal `XXXX`; optionally `SONA_MIN_MINUTES`.
+  `TURNSTILE_SECRET_KEY` is required: with the gate off, credit is refused.
+- **Smoke test** with a `TEST…` code (`?sona=TEST42&rooms=2&trials=2`): it can
+  be shortened, and can never be credited. Then check both halves:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_EXPORT_SECRET" \
+  "https://<sona-project>.vercel.app/api/export?participant_id=TEST42"
+curl -H "Authorization: Bearer $ADMIN_EXPORT_SECRET" \
+  "https://<sona-project>.vercel.app/api/export?credits=1"
+```
+
+Any `refused` or `failed` row in the credit ledger needs granting by hand in
+SONA.
+
 ### What `vercel.json` does
 
 | Rule | Why |

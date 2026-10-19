@@ -520,8 +520,48 @@ function showLoadingOverlay() {
     // the file synchronously, and only the upload is async. Waiting on a POST
     // that can take seconds would put a blank page exactly where the blank
     // page used to be.
-    on_finish: () => { save(true); showAllDone(); },
+    on_finish: () => {
+      const saving = save(true);
+      showAllDone();
+      if (cfg.sona_id) reportSonaOutcome(saving);
+    },
   });
+
+  /**
+   * Tell a SONA participant what became of their data and their credit.
+   *
+   * The server grants credit only after it has stored the final upload (see
+   * api/_lib/sona.js), so there is nothing to redirect to: the answer to
+   * "did I get credit" arrives in the upload's own response. An upload that
+   * still fails after uploadFinal's retries offers another try rather than a
+   * dead end -- this tab holds the only copy of the session.
+   */
+  function reportSonaOutcome(saving) {
+    const status = (html) => {
+      const el = target.querySelector("#sona-status");
+      if (el) el.innerHTML = html;
+      return el;
+    };
+    saving.then((result) => {
+      if (!result?.ok) {
+        const el = status(
+          "We could not save your responses. Please keep this tab open, check "
+          + "your internet connection, and press Try again.<br>"
+          + `<button class="big" id="sona-retry" type="button">Try again</button>`);
+        el?.querySelector("#sona-retry").addEventListener("click", () => {
+          status("Saving your responses&hellip; please keep this tab open.");
+          reportSonaOutcome(uploadFinal(finalPayload).catch(() => null));
+        });
+      } else if (result.credit === "granted") {
+        status("Your responses are saved and your SONA credit has been granted. "
+          + "You can close this tab now. Thank you!");
+      } else {
+        status("Your responses are saved. Your SONA credit could not be granted "
+          + "automatically, so the research team will grant it for you &mdash; "
+          + `you do not need to do anything else. Your code is <b>${cfg.sona_id}</b>.`);
+      }
+    });
+  }
 
   // The last payload built, so the closing screen's download button has
   // something to hand back without rebuilding it from state that has since
@@ -530,7 +570,7 @@ function showLoadingOverlay() {
 
   let saved = false;
   async function save(completed) {
-    if (saved) return;
+    if (saved) return null;
     saved = true;
     const payload = buildPayload({ config: cfg, responses, castle, shop, startTime, completed });
     finalPayload = payload;
@@ -547,7 +587,7 @@ function showLoadingOverlay() {
     // failure there is loud for that reason, and no longer has a file already
     // on disk to fall back on -- only a button someone has to notice.
     if (cfg.upload_url) {
-      try { await postPayload(cfg.upload_url, payload, { ticket: getTicket() }); }
+      try { return await uploadFinal(payload); }
       catch (e) {
         console.error(cfg.offer_download === false
           ? "upload failed and no download was offered -- this session is lost"
@@ -564,6 +604,24 @@ function showLoadingOverlay() {
       // to lose it.
       console.warn("no upload_url: this session is only in the closing "
         + "screen's download button -- closing the tab discards it");
+    }
+    return null;
+  }
+
+  // The server's answer to the final upload: {ok, id, credit}. A SONA
+  // participant's credit hangs on this one POST and they have no download
+  // button to fall back on, so it gets retried with backoff (2s, 4s, 8s);
+  // everywhere else a failure is left to the closing screen's button.
+  async function uploadFinal(payload) {
+    const tries = cfg.sona_id ? 4 : 1;
+    for (let i = 1; ; i++) {
+      try {
+        const res = await postPayload(cfg.upload_url, payload, { ticket: getTicket() });
+        return { ok: true, ...(await res.json().catch(() => ({}))) };
+      } catch (e) {
+        if (i >= tries) throw e;
+        await new Promise((r) => setTimeout(r, 2000 * 2 ** (i - 1)));
+      }
     }
   }
 
@@ -600,6 +658,8 @@ function showLoadingOverlay() {
       <div class="screen">
         ${cfg.Gamify && mascot ? `<img class="pip big-pip" src="${mascot}" alt="">` : ""}
         <p class="speech">${text}</p>
+        ${cfg.sona_id ? `<p class="hint" id="sona-status">Saving your responses&hellip;
+          please keep this tab open.</p>` : ""}
       </div>`;
 
     if (cfg.offer_download === false || !finalPayload) return;
