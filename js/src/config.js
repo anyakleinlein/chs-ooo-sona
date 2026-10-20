@@ -67,7 +67,7 @@ export const CONFIG = {
   // only, in Vercel's env vars). Blank runs every session ungated, which is
   // what a lab build with no backend wants -- see js/src/captcha.js. Get one
   // at https://dash.cloudflare.com/?to=/:account/turnstile.
-  turnstile_site_key: "",
+  turnstile_site_key: "0x4AAAAAAFca20iWS4caHT_z",
 
   // Dev/QA only -- added straight onto the spendable balance (never onto
   // castle.coins_awarded, which stays the response-blind, reproducible-
