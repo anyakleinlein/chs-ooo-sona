@@ -10,3 +10,7 @@ node_modules/
 .env.*
 !.env.example
 .vercel/
+
+# Cross-reference output from tools/sona_credit_report.py: participant codes
+# and progress, which do not belong in a public repository.
+tools/out/
