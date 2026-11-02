@@ -61,6 +61,10 @@ export const CONFIG = {
   // public deploy points this at its own /api/submit -- the ONE line
   // utilities/export_public.py has to rewrite, so keep them together.
   upload_url: "/api/submit",
+  // Each answer, as it is given (api/trial.js). Only used once the session
+  // holds a ticket, i.e. when this deploy has its own api/ -- a lab build over
+  // `python3 -m http.server` would otherwise fail one request per trial.
+  trial_url: "/api/trial",
 
   // Public Turnstile SITE key for this deploy (not secret -- it is meant to
   // ship to the client; pairs with TURNSTILE_SECRET_KEY, set server-side

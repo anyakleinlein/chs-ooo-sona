@@ -105,6 +105,22 @@ curl -H "Authorization: Bearer $ADMIN_EXPORT_SECRET" \
 Any `refused` or `failed` row in the credit ledger needs granting by hand in
 SONA.
 
+**Who to credit by hand.** One line per participant, joining the start row,
+the per-trial rows and the credit ledger -- `completed`, `trials_saved` and
+`credit_status` are the columns to read:
+
+```bash
+curl -s -H "Authorization: Bearer $ADMIN_EXPORT_SECRET" \
+  "https://<sona-project>.vercel.app/api/export?summary=1" \
+  | jq -r '.participants[] | [.participant_id, .started, .completed,
+      .trials_saved, .planned_regular_trials, .credit_status] | @csv'
+```
+
+A SONA code that is not in this list never got past the setup form, consent
+and bot gate -- the start row is written right after them, before trial 1.
+Sessions run before the start row and per-trial saves were deployed show up
+only if they reached the end of a room.
+
 ### What `vercel.json` does
 
 | Rule | Why |

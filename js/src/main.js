@@ -23,7 +23,7 @@ import { CutscenePlugin, resolvePanels, probeImages } from "./cutscene.js";
 import { PlaygroundPlugin } from "./playground.js";
 import { MansionPlugin } from "./mansion.js";
 import { ShopPlugin } from "./shop_plugin.js";
-import { buildPayload, makeResponse, downloadPayload, postPayload } from "./save.js";
+import { buildPayload, makeResponse, downloadPayload, postPayload, postTrial } from "./save.js";
 import { admitSession, getTicket } from "./captcha.js";
 import { sessionPlan } from "./session.js";
 import { setupNeeded, showSetup } from "./setup.js";
@@ -695,6 +695,38 @@ function showLoadingOverlay() {
     catch (e) { console.error(`per-block upload failed (room ${roomIndex})`, e); }
   }
 
+  // The session's first server-side record, written before trial 0: who was
+  // admitted, their demographics and consent. Without it someone who stops
+  // before answering anything is indistinguishable from someone who never
+  // opened the link -- which is the question a SONA timeslot with no data
+  // raises.
+  async function saveStart() {
+    if (!cfg.upload_url) return;
+    const payload = buildPayload({ config: cfg, responses, castle, shop, startTime, completed: false });
+    try { await postPayload(cfg.upload_url, payload, { ticket: getTicket(), event: "start" }); }
+    catch (e) { console.error("start upload failed", e); }
+  }
+
+  // Every answer, the moment it is given -- the desktop build's per-trial
+  // upload. A failed row is re-sent alongside the next trial's (api/trial.js
+  // ignores a row it already has), a few times at most: a backend that stays
+  // down would otherwise be sent the whole backlog again on every trial, and
+  // the room-end and final saves carry every row regardless.
+  const TRIAL_TRIES = 3;
+  const unsentTrials = [];
+  function saveTrial(row) {
+    const ticket = getTicket();
+    if (!cfg.trial_url || !ticket) return;
+    unsentTrials.push({ row, tries: 0 });
+    for (const item of unsentTrials.splice(0)) {
+      item.tries++;
+      postTrial(cfg.trial_url, item.row, { ticket }).catch((e) => {
+        if (item.tries < TRIAL_TRIES) unsentTrials.push(item);
+        else console.error(`trial ${item.row.trial_index} upload failed`, e);
+      });
+    }
+  }
+
   // A child who stops partway still yields data: "trials completed before
   // disengagement" is one of the measures the pilot is built around.
   window.addEventListener("beforeunload", () => { if (responses.length) save(false); });
@@ -930,6 +962,7 @@ function showLoadingOverlay() {
           row.stimulus_autoplay_blocked = Boolean(d.autoplay_blocked);
         }
         responses.push(row);
+        saveTrial(row);
         // Fires for BOTH arms (gamified or plain), unlike the reward screen
         // below which is Gamify-only -- a baseline-arm session has no room-
         // complete screen to hang this off of otherwise, and losing only
@@ -1234,6 +1267,7 @@ function showLoadingOverlay() {
     // screen that can be dismissed, and there is nothing after this one.
   }
 
+  saveStart();
   jsPsych.run(timeline);
   hideLoadingOverlay();
 })().catch((e) => {

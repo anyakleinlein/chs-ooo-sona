@@ -64,7 +64,7 @@ async function record(code, status, detail, sessionRow) {
 export async function grantSonaCredit({ pid, ticket, payload, tag, sessionRow }) {
   const pd = payload.participant_data;
   const code = pd.sona_id;
-  if (!code || tag.startsWith("block-")) return null;
+  if (!code || !tag.startsWith("final")) return null;
 
   await ensureCreditsSchema();
 

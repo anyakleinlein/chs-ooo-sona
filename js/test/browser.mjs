@@ -46,7 +46,10 @@ if (!process.argv[2]) {
                    // download offered, the POST is the only way the data
                    // leaves the page, so the harness must exercise it.
                    "?child=SG7JLN&response=d5c8f502-6588-46c8-84fa-a9657a44fe47" +
-                   "&rooms=2&trials=2&upload=http://localhost/collect"]) {
+                   "&rooms=2&trials=2&upload=http://localhost/collect",
+                   // A SONA link with a TEST code, the one code short enough
+                   // to drive to the end -- see SONA below.
+                   "?sona=TEST42&rooms=2&trials=2"]) {
     console.log(`\n=================== ${q} ===================`);
     const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), q],
                         { stdio: "inherit" });
@@ -150,6 +153,18 @@ globalThis.URL.revokeObjectURL = () => {};
 globalThis.FileReader = dom.window.FileReader;
 globalThis.File = dom.window.File;
 
+// The deploy's config carries a Turnstile site key, so the session now loads
+// Cloudflare's script before it will start -- which jsdom never fetches, and
+// every case timed out at the gate. A widget that solves at once stands in;
+// captcha.js skips the script load when window.turnstile already exists.
+dom.window.turnstile = {
+  render: (_el, opts) => setTimeout(() => opts.callback("harness-token"), 0),
+};
+
+// What reached api/trial.js and submit.js's start row -- see the fetch stub.
+const trialUploads = [];
+const startUploads = [];
+
 // Serve the repo's files straight off disk.
 globalThis.fetch = async (url, init) => {
   // A CHS session is never offered a download, so the POST to upload_url is
@@ -182,6 +197,20 @@ globalThis.fetch = async (url, init) => {
         auth: String(init.headers?.Authorization ?? ""),
       });
       return { ok: true, status: 200, json: async () => ({ ok: true, id: 1 }) };
+    }
+    // One answer per POST, as it is given. Never the payload, so never what
+    // ends the driving loop.
+    if (String(url).includes("/api/trial")) {
+      trialUploads.push({ row: JSON.parse(init.body),
+                          auth: String(init.headers?.Authorization ?? ""),
+                          keepalive: init.keepalive === true });
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    // The start row: a POST to upload_url like the final save, told apart by
+    // its header -- the same trap the block checkpoints below describe.
+    if (init.headers?.["X-Session-Event"] === "start") {
+      startUploads.push({ body: JSON.parse(init.body), trialsBefore: trialUploads.length });
+      return { ok: true, status: 200, json: async () => ({ ok: true, id: 1, credit: null }) };
     }
     // Per-block checkpoints (X-Session-Block header set -- see
     // js/src/save.js's postPayload) fire mid-session, one per completed
@@ -542,6 +571,27 @@ if (!SETUP) {
         `trial_index not monotonic: ${idxs}`);
   check(idxs[0] === 0 && idxs[idxs.length - 1] === rows.length - 1,
         `trial_index is not 0..${rows.length - 1}: ${idxs}`);
+
+  // Every answer reached the server on its own, not only inside a room-end or
+  // final save -- the record of a session abandoned mid-room.
+  const sentIdxs = trialUploads.map((u) => u.row.trial_index).sort((a, b) => a - b);
+  check(JSON.stringify(sentIdxs) === JSON.stringify(idxs),
+        `per-trial uploads ${sentIdxs} do not match the responses ${idxs}`);
+  check(trialUploads.every((u) => u.auth === "Bearer harness-ticket"),
+        "a per-trial upload went without the session ticket");
+  check(trialUploads.every((u) => u.keepalive),
+        "a per-trial upload was not keepalive, so the last answer before a tab closes is lost");
+  check(JSON.stringify(trialUploads.map((u) => u.row))
+          === JSON.stringify([...rows].sort((a, b) => a.trial_index - b.trial_index)),
+        "a per-trial row differs from the same row in the final payload");
+  // The start row: once, before any answer, with the demographics and none of
+  // the responses.
+  check(startUploads.length === 1, `expected one start row, got ${startUploads.length}`);
+  check(startUploads[0]?.trialsBefore === 0, "the start row was sent after a trial");
+  check(startUploads[0]?.body.responses?.length === 0, "the start row carried responses");
+  check(startUploads[0]?.body.participant_data?.participant_id
+          === payload?.participant_data?.participant_id,
+        "the start row named a different participant");
 
   // The consent gate blocks every session, so reaching a payload at all proves
   // it was passed. What that does NOT prove is that it asked for anything --

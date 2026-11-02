@@ -197,18 +197,38 @@ export function forSubmission(payload) {
  * upload_url, so a third call site cannot be added that quietly ships the
  * game state to somebody's endpoint.
  */
-export async function postPayload(url, payload, { ticket, block } = {}) {
+export async function postPayload(url, payload, { ticket, block, event } = {}) {
   const headers = { "Content-Type": "application/json" };
   // The session-admission ticket from js/src/captcha.js -- api/submit.js
   // verifies it before it will store anything. A header, not a body field, so
   // the body stays exactly the JSON any collection endpoint is promised.
   if (ticket) headers.Authorization = `Bearer ${ticket}`;
   if (Number.isFinite(block)) headers["X-Session-Block"] = String(block);
+  if (event) headers["X-Session-Event"] = event;
   const res = await fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify(forSubmission(payload)),
   });
   if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+  return res;
+}
+
+/**
+ * POST one response row as soon as it is answered (api/trial.js).
+ *
+ * `keepalive` so the answer given just before a tab is closed still lands:
+ * the browser finishes a keepalive request after the page is gone, which is
+ * exactly when a participant who walks away stops. Its 64 KB in-flight budget
+ * is no constraint on a body of a few hundred bytes.
+ */
+export async function postTrial(url, row, { ticket } = {}) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${ticket}` },
+    body: JSON.stringify(row),
+    keepalive: true,
+  });
+  if (!res.ok) throw new Error(`trial upload failed: ${res.status}`);
   return res;
 }

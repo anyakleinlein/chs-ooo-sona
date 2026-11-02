@@ -1,8 +1,10 @@
 /**
- * Receive one session's data: called once per completed room (see
- * js/README.md's block table) and again with the full payload at session
+ * Receive one session's data: called once with no responses as soon as the
+ * session is admitted (X-Session-Event: start), once per completed room (see
+ * js/README.md's block table), and again with the full payload at session
  * end, so a child who disengages partway still has their earlier blocks
  * recorded server-side rather than only in a browser tab that may never save.
+ * The individual trials between those go to trial.js as they are answered.
  *
  * Requires a ticket from verify-start.js (Authorization: Bearer <ticket>) --
  * Turnstile itself is solved only once, at session start; see _lib/ticket.js
@@ -50,7 +52,10 @@ const MAX_BODY_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS_PER_TICKET = 200;
 const TICKET_WINDOW = "3 hours";   // _lib/ticket.js's TICKET_LIFETIME_MS
 
-function tagFor(payload, block) {
+// "start" is the row written once a session is admitted, before its first
+// trial: the demographics and consent of someone who may never answer one.
+function tagFor(payload, block, event) {
+  if (event === "start") return "start";
   if (Number.isFinite(block)) return `block-${block}`;
   return payload?.participant_data?.completion_status === 1 ? "final" : "final_partial";
 }
@@ -109,7 +114,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const tag = tagFor(payload, block);
+  const tag = tagFor(payload, block, req.headers["x-session-event"]);
 
   // Only the measurement is stored: the triplets and the demographics. The
   // game layer's own state -- stickers, placements, purchases, mini-game

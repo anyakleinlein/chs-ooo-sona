@@ -338,8 +338,9 @@ not what you want for a real deployment.
 | | |
 |---|---|
 | `api/verify-start.js` | Verifies one Cloudflare Turnstile solve per session, mints a signed session ticket |
-| `api/submit.js` | Stores a session's data (called once per completed room, and again at the end) into Postgres, gated on that ticket |
-| `api/export.js` | Lets *you* pull recorded sessions back out, gated on a separate admin secret |
+| `api/submit.js` | Stores a session's data (once at admission with no responses, once per completed room, and again at the end) into Postgres, gated on that ticket |
+| `api/trial.js` | Stores each answered triplet the moment it is answered (the `trials` table), gated on that ticket, so a session abandoned mid-room keeps every answer |
+| `api/export.js` | Lets *you* pull recorded sessions back out (`?trials=1` for per-trial rows, `?summary=1` for one line per participant), gated on a separate admin secret |
 | `js/src/captcha.js` | Client side: renders the Turnstile widget, trades the solve for a ticket |
 
 **Why a ticket, not the raw Turnstile token, on every upload.** Turnstile

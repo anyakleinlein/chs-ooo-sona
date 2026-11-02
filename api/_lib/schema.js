@@ -75,6 +75,46 @@ export function ensureCreditsSchema() {
   return creditsReady;
 }
 
+let trialsReady = null;
+
+/**
+ * One row per answered triplet -- see api/trial.js, the only writer. The
+ * per-trial record the desktop build keeps (utilities/redcap_utils.py uploads
+ * every trial as it happens), so a session abandoned partway through its first
+ * room still leaves every answer it gave, not nothing.
+ *
+ * Its own table rather than more `sessions` rows: a sessions row is the whole
+ * payload so far, so one per trial would store a 550-trial session ~275 times
+ * over.
+ *
+ * `session_started` is the ticket's issue time, which is what makes the UNIQUE
+ * key right in both directions: the same trial retried within one session lands
+ * once, while a participant who reloads and replays the same seeded sequence
+ * under the same id gets a second, distinguishable set of rows rather than
+ * having their second attempt silently dropped as duplicates of the first.
+ */
+export function ensureTrialsSchema() {
+  if (!trialsReady) {
+    trialsReady = (async () => {
+      await sql`
+        CREATE TABLE IF NOT EXISTS trials (
+          id SERIAL PRIMARY KEY,
+          participant_id TEXT NOT NULL,
+          session_started TIMESTAMPTZ NOT NULL,
+          trial_index INTEGER NOT NULL,
+          response JSONB NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+      `;
+      await sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS trials_session_trial_idx
+          ON trials (participant_id, session_started, trial_index);
+      `;
+    })().catch((e) => { trialsReady = null; throw e; });
+  }
+  return trialsReady;
+}
+
 let consentReady = null;
 
 /**
