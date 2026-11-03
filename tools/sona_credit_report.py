@@ -25,9 +25,7 @@ Output lands in tools/out/, which is gitignored: this repository is public.
 import argparse
 import csv
 import json
-import os
 import sys
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -58,13 +56,9 @@ def read_codes(path, column):
 
 
 def fetch_summary(base_url):
-    secret = os.environ.get("ADMIN_EXPORT_SECRET")
-    if not secret:
-        sys.exit("ADMIN_EXPORT_SECRET is not set; export it, or pass --summary <saved json>")
-    req = urllib.request.Request(f"{base_url}/api/export?summary=1",
-                                 headers={"Authorization": f"Bearer {secret}"})
-    with urllib.request.urlopen(req) as r:
-        return json.load(r)
+    sys.path.insert(0, str(TOOLS_DIR))
+    from fetch_sona_data import fetch, read_secret
+    return fetch(f"{base_url}/api/export?summary=1", read_secret())
 
 
 def minutes_between(start, end):
