@@ -23,7 +23,7 @@ import { CutscenePlugin, resolvePanels, probeImages } from "./cutscene.js";
 import { PlaygroundPlugin } from "./playground.js";
 import { MansionPlugin } from "./mansion.js";
 import { ShopPlugin } from "./shop_plugin.js";
-import { buildPayload, makeResponse, downloadPayload, postPayload, postTrial } from "./save.js";
+import { buildPayload, makeResponse, downloadPayload, postPayload, postTrial, stamp } from "./save.js";
 import { admitSession, getTicket } from "./captcha.js";
 import { sessionPlan } from "./session.js";
 import { setupNeeded, showSetup } from "./setup.js";
@@ -495,7 +495,10 @@ function showLoadingOverlay() {
     ? castle.coins_awarded + castle.minigame_coins - shop.totalSpent + (cfg.Debug_Bonus_Coins || 0)
     : 0);
 
-  const startTime = new Date().toISOString().slice(0, 19).replace("T", " ");
+  // Local time, the same clock as end_time (save.js's stamp). This used to be
+  // UTC while end_time was local, so end - start was off by the UTC offset --
+  // five or six hours of negative "duration" in every web session before.
+  const startTime = stamp();
   const responses = [];
 
   // #jspsych-target still holds whatever showSetup/showConsentGate last wrote
